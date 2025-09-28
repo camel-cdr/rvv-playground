@@ -1,4 +1,10 @@
+#ifndef UTILS_H_INCLUDED
+#define UTILS_H_INCLUDED
+
 #if !defined(NOLOG) && !defined(FUZZ)
+
+#include <string.h>
+#include <stdio.h>
 
 #ifndef LOG_INDENT
 #define LOG_INDENT 8
@@ -32,6 +38,13 @@
 	puts(""); \
 } while (0)
 
+#define LOGVf(name, v, vl) do { \
+	LOG_NAME(name); \
+	for (size_t i = vl; i--; ) \
+		printf("%g ", __riscv_vfmv_f(__riscv_vslidedown(v, i, vl))); \
+	puts(""); \
+} while (0)
+
 #define LOGM(name, M, m, vl) LOGMf(name, M, "%1x", m, vl)
 
 #define LOGMf(name, M, fmt, m, vl) do { \
@@ -47,4 +60,21 @@
 #define LOGV(...)
 #define LOGM(...)
 #define LOGMf(...)
+#endif
+
+typedef struct { uint64_t x, y, z; } RandU64;
+
+#define RANDU64_ROTL(x,n) (((x) << (n)) | ((x) >> (8*sizeof(x) - (n))))
+
+/* RomuTrio, see https://romu-random.org/ */
+static inline uint64_t
+randu64(RandU64 *r)
+{
+	uint64_t xp = r->x, yp = r->y, zp = r->z;
+	r->x = 15241094284759029579u * zp;
+	r->y = RANDU64_ROTL(yp - xp, 12);
+	r->z = RANDU64_ROTL(zp - yp, 44);
+	return xp;
+}
+
 #endif
