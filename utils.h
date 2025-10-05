@@ -16,7 +16,7 @@
 #define LOG_NAME(name) do { \
 		static char str[LOG_INDENT < sizeof name ? sizeof name : LOG_INDENT]; \
 		memcpy(str, name, sizeof name); \
-		memset(str + sizeof name, ' ', sizeof str - sizeof name); \
+		memset(str + sizeof name - 1, ' ', sizeof str - sizeof name + 1); \
 		fwrite(str, 1, sizeof str, stdout); \
 	} while (0)
 
