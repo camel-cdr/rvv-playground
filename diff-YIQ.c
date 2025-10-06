@@ -211,7 +211,7 @@ rvv_yiq_diff(vuint8m1x4_t v4, vuint8m1x4_t y4, size_t vl)
 	return v;
 }
 
-size_t
+static size_t
 diff_rvv(uint32_t *src1, uint32_t *src2, size_t n, float *diff)
 {
 	size_t count = 0;
@@ -368,5 +368,9 @@ main(void)
  * sg2042 (XuanTie C910v1) with N 1024*1024*32:
  *     rvv:    0.151 secs
  *     scalar: 0.890 secs (5.9x speedup)
+ *
+ * bpi-f3 (SpacemiT X60) with N 1024*1024*32:
+ *     rvv:    0.160 secs
+ *     scalar: 3.058 secs (5.9x speedup)
  */
 #endif
