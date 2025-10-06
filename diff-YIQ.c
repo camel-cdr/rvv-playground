@@ -234,8 +234,9 @@ __attribute__((noinline))
 size_t
 odiff_rvv(uint32_t *src1, uint32_t *src2, size_t n, float max_delta, uint32_t *diff, uint32_t diffcol)
 {
+	int writeDiff = !!diff;
 	size_t count = 0;
-	for (size_t vl; n > 0; n -= vl, src1 += vl, src2 += vl) {
+	for (size_t vl; n > 0; n -= vl, src1 += vl, src2 += vl, diff += vl) {
 
 #if __riscv_xtheadvector
 		/* segmented load are very slow xtheadvector hardware (C910v1) */
@@ -261,6 +262,7 @@ odiff_rvv(uint32_t *src1, uint32_t *src2, size_t n, float max_delta, uint32_t *d
 		if (idx < 0) continue;
 		src1 += idx;
 		src2 += idx;
+		diff += idx;
 		n -= idx;
 
 		vl = __riscv_vsetvl_e8m1(n);
@@ -270,9 +272,8 @@ odiff_rvv(uint32_t *src1, uint32_t *src2, size_t n, float max_delta, uint32_t *d
 		vbool8_t m = __riscv_vmfgt(rvv_yiq_diff(v4, y4, vl), max_delta, vl);
 		count += __riscv_vcpop(m, vl);
 
-		if (diff) {
+		if (writeDiff) {
 			__riscv_vse32(m, diff, __riscv_vmv_v_x_u32m4(diffcol, vl), vl);
-			diff += vl;
 		}
 	}
 	return count;
