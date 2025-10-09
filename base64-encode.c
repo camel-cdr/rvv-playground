@@ -147,17 +147,20 @@ VARIANT(b64_encode_rvv_seg)(uint8_t *dst, const uint8_t *src, size_t length, con
 #else
 	vuint8m1_t vlut = __riscv_vle8_v_u8m1(lut2, 16);
 #endif
+	size_t tail = length - length/3*3;
+	length /= 3;
 
-	for (; length >= VL4; length -= VL*3, src += VL*3, dst += VL4) {
-		vuint8m1x3_t vseg = __riscv_vlseg3e8_v_u8m1x3(src, VL);
+	for (size_t vl; length > 0; length -= vl, src += vl*3, dst += vl*4) {
+		vl = __riscv_vsetvl_e8m1(length);
+		vuint8m1x3_t vseg = __riscv_vlseg3e8_v_u8m1x3(src, vl);
 		vuint8m1_t v0 = __riscv_vget_u8m1(vseg, 0);
 		vuint8m1_t v1 = __riscv_vget_u8m1(vseg, 1);
 		vuint8m1_t v2 = __riscv_vget_u8m1(vseg, 2);
 
-		vuint8m1_t vd = __riscv_vand(v2, v63, VL);
-		vuint8m1_t vc = __riscv_vand(__riscv_vmacc(__riscv_vsrl(v2, 6, VL), 1<<2, v1, VL), v63, VL);
-		vuint8m1_t vb = __riscv_vand(__riscv_vmacc(__riscv_vsrl(v1, 4, VL), 1<<4, v0, VL), v63, VL);
-		vuint8m1_t va = __riscv_vsrl(v0, 2, VL);
+		vuint8m1_t vd = __riscv_vand(v2, v63, vl);
+		vuint8m1_t vc = __riscv_vand(__riscv_vmacc(__riscv_vsrl(v2, 6, vl), 1<<2, v1, vl), v63, vl);
+		vuint8m1_t vb = __riscv_vand(__riscv_vmacc(__riscv_vsrl(v1, 4, vl), 1<<4, v0, vl), v63, vl);
+		vuint8m1_t va = __riscv_vsrl(v0, 2, vl);
 
 		vuint8m4_t abcd = __riscv_vcreate_v_u8m1_u8m4(va, vb, vc, vd);
 #if VARIANT(0) == 1
@@ -178,9 +181,9 @@ VARIANT(b64_encode_rvv_seg)(uint8_t *dst, const uint8_t *src, size_t length, con
 		vb = __riscv_vget_u8m1(abcd, 1);
 		vc = __riscv_vget_u8m1(abcd, 2);
 		vd = __riscv_vget_u8m1(abcd, 3);
-		__riscv_vsseg4e8_v_u8m1x4(dst, __riscv_vcreate_v_u8m1x4(va, vb, vc, vd), VL);
+		__riscv_vsseg4e8_v_u8m1x4(dst, __riscv_vcreate_v_u8m1x4(va, vb, vc, vd), vl);
 	}
-	return (dst - dstBeg) + b64_encode_scalar(dst, src, length, lut);
+	return (dst - dstBeg) + b64_encode_scalar(dst, src, length*3+tail, lut);
 }
 
 #endif
