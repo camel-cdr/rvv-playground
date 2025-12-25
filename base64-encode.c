@@ -1,3 +1,24 @@
+/*
+ * base64-encode
+ *
+ * This implements four versions of base64 decode
+ *
+ * There are two variants for the final translation to the base64 alphabet:
+ *
+ * 1: direct translation with vrgathers of 64 elements, minimizes LMUL based on VLEN
+ * 2: offset with LMUL=1 vrgathers
+ *
+ * As well as two variants for going from 8-bit input to 6-bit each working on
+ * LMUL=4 worth of data:
+ *
+ * rvv:     uses vrgather and LMUL=4 RVV instructions
+ * rvv_seg: uses segmented load/stores and LMUL=1 RVV instructions
+ *
+ *
+ * b64_encode_rvv_seg1 seems to be the best one out of the bunch.
+ *
+ */
+
 #ifndef VARIANT
 
 #include <riscv_vector.h>
@@ -23,30 +44,21 @@ b64_encode_scalar(uint8_t *dst, const uint8_t *src, size_t length, const uint8_t
 	return dst - dstBeg;
 }
 
-#define vrgather_u8m1x4(tbl, idx)                                               \
-	__riscv_vcreate_v_u8m1_u8m4(                                            \
-		__riscv_vrgather_vv_u8m1(tbl, __riscv_vget_v_u8m4_u8m1(idx, 0), \
-		                              __riscv_vsetvlmax_e8m1()),        \
-		__riscv_vrgather_vv_u8m1(tbl, __riscv_vget_v_u8m4_u8m1(idx, 1), \
-		                              __riscv_vsetvlmax_e8m1()),        \
-		__riscv_vrgather_vv_u8m1(tbl, __riscv_vget_v_u8m4_u8m1(idx, 2), \
-		                              __riscv_vsetvlmax_e8m1()),        \
-		__riscv_vrgather_vv_u8m1(tbl, __riscv_vget_v_u8m4_u8m1(idx, 3), \
-		                              __riscv_vsetvlmax_e8m1()))
+#define vrgather_u8m1x4vl(tbl, idx, vl) \
+	__riscv_vcreate_v_u8m1_u8m4( \
+		__riscv_vrgather_vv_u8m1(tbl, __riscv_vget_v_u8m4_u8m1(idx, 0), vl), \
+		__riscv_vrgather_vv_u8m1(tbl, __riscv_vget_v_u8m4_u8m1(idx, 1), vl), \
+		__riscv_vrgather_vv_u8m1(tbl, __riscv_vget_v_u8m4_u8m1(idx, 2), vl), \
+		__riscv_vrgather_vv_u8m1(tbl, __riscv_vget_v_u8m4_u8m1(idx, 3), vl))
 
-#define vrgather_u8m2x2(tbl, idx)                                               \
-	__riscv_vcreate_v_u8m2_u8m4(                                            \
+#define vrgather_u8m2x2(tbl, idx) \
+	__riscv_vcreate_v_u8m2_u8m4( \
 		__riscv_vrgather_vv_u8m2(tbl, __riscv_vget_v_u8m4_u8m2(idx, 0), \
 		                              __riscv_vsetvlmax_e8m2()),        \
 		__riscv_vrgather_vv_u8m2(tbl, __riscv_vget_v_u8m4_u8m2(idx, 1), \
 		                              __riscv_vsetvlmax_e8m2()))
 
-/*
- * There are two variants for the final translation to the base64 alphabet
- *
- * 1: direct translation with vrgathers of 64 elements, minimizes LMUL based on VLEN
- * 2: offset with LMUL=1 vrgathers
- */
+#define vrgather_u8m1x4(tbl, idx) vrgather_u8m1x4vl(tbl, idx, __riscv_vsetvlmax_e8m1())
 
 #define VARIANT(x) x##1
 #include __FILE__
@@ -165,7 +177,7 @@ VARIANT(b64_encode_rvv_seg)(uint8_t *dst, const uint8_t *src, size_t length, con
 		vuint8m4_t abcd = __riscv_vcreate_v_u8m1_u8m4(va, vb, vc, vd);
 #if VARIANT(0) == 1
 		/**/ if (VL >= 64)
-			abcd = vrgather_u8m1x4(__riscv_vlmul_trunc_u8m1(vlut), abcd);
+			abcd = vrgather_u8m1x4vl(__riscv_vlmul_trunc_u8m1(vlut), abcd, vl);
 		else if (VL2 >= 64)
 			abcd = vrgather_u8m2x2(__riscv_vlmul_trunc_u8m2(vlut), abcd);
 		else /* VL4 is always >= 64, because V mandates VLEN >= 128 */
@@ -208,13 +220,19 @@ static const uint8_t base64shiftLUT[16] = {
 #include <assert.h>
 #include <string.h>
 
-#define N 1024
-static uint8_t ref[N*2], rvv1[N*2], seg1[N*2], rvv2[N*2], seg2[N*2];
+#define N (1024*4)
 
 int
 LLVMFuzzerTestOneInput(const uint8_t *src, size_t size)
 {
 	if (size > N) return -1;
+
+#if __STDC_NO_VLA__
+	static uint8_t ref[N*2], rvv1[N*2], seg1[N*2], rvv2[N*2], seg2[N*2];
+#else
+	size_t ndst = (size*4/3+3)/4*4; ndst = ndst ? ndst : 1;
+	uint8_t ref[ndst], rvv1[ndst], seg1[ndst], rvv2[ndst], seg2[ndst];
+#endif
 	size_t nref = b64_encode_scalar(ref, src, size, base64LUT);
 	size_t nrvv1 = b64_encode_rvv1(rvv1, src, size, base64LUT, base64shiftLUT);
 	size_t nseg1 = b64_encode_rvv_seg1(seg1, src, size, base64LUT, base64shiftLUT);
