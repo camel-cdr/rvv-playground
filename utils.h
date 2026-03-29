@@ -1,7 +1,7 @@
 #ifndef UTILS_H_INCLUDED
 #define UTILS_H_INCLUDED
 
-#if !defined(NOLOG) && !defined(FUZZ)
+#if !defined(NOLOG)
 
 #include <string.h>
 #include <stdio.h>
@@ -12,6 +12,8 @@
 
 #define logf printf
 #define log puts
+
+#define LOGf(name, ...) do { LOG_NAME(name); logf(__VA_ARGS__); } while (0)
 
 #define LOG_NAME(name) do { \
 		static char str[LOG_INDENT < sizeof name ? sizeof name : LOG_INDENT]; \
@@ -56,6 +58,7 @@
 #else
 #define logf(...)
 #define log(...)
+#define LOGf(...)
 #define LOGC(...)
 #define LOGV(...)
 #define LOGM(...)
@@ -75,6 +78,15 @@ randu64(RandU64 *r)
 	r->y = RANDU64_ROTL(yp - xp, 12);
 	r->z = RANDU64_ROTL(zp - yp, 44);
 	return xp;
+}
+
+uint64_t
+hash64(uint64_t x)
+{
+	x ^= x >> 30; x *= 0xbf58476d1ce4e5b9U;
+	x ^= x >> 27; x *= 0x94d049bb133111ebU;
+	x ^= x >> 31;
+	return x;
 }
 
 #endif
