@@ -1,3 +1,27 @@
+/* bigint-add.c -- RVV implementation of arbitrary-precision addition
+ * Olaf Bernstein <camel-cdr@protonmail.com>
+ * Distributed under the MIT license, see license at the end of the file.
+ * New versions available at https://github.com/camel-cdr/rvv-playground
+ *
+ * Benchmarks:
+ *
+ * SpacemiT X100 N=1024*32 WORK=1ull<<32:
+ *     gmp:            6.583392 secs
+ *     simple:         7.047197 secs
+ *     speculative:    5.874165 secs
+ *     speculative_x4: 5.438176 secs
+ *     sorear:         7.421120 secs
+ *     rvv:            4.223685 secs
+ *
+ * SpacemiT A100 N=1024*32 WORK=1ull<<32:
+ *     gmp:            201.278858 secs
+ *     simple:         138.622004 secs
+ *     speculative:    208.885835 secs
+ *     speculative_x4: 121.358876 secs
+ *     sorear:         121.111467 secs
+ *     rvv:             13.446655 secs
+ */
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -62,13 +86,13 @@ add_speculative_x4(ARGS)
 	for (; n >= 4; n -= 4) {
 		uint64_t saved = carry;
 
-		#define STEP(f) \
+		#define IMPL(f) \
 			d = *lhs++ + (s = *rhs++); \
 			*dst++ = d + carry; \
 			const uint64_t f = d == (uint64_t)-1; \
 			carry = d < s;
 
-		STEP(f1); STEP(f2); STEP(f3); STEP(f4);
+		IMPL(f1); IMPL(f2); IMPL(f3); IMPL(f4);
 
 		if (unlikely((f1 | f2) | (f3 | f4))) {
 			carry = adc_simple(dst-4, lhs-4, rhs-4, 4, saved);
@@ -108,11 +132,11 @@ add_rvv(uint64_t *restrict dst, uint64_t *restrict lhs, uint64_t *restrict rhs, 
 	vuint64m1_t v1 = __riscv_vmv_v_x_u64m1(-1, VL1);
 	vbool64_t carryin = __riscv_vmclr_m_b64(VL1);
 
-#define STEP1(mx, bx, vl_expr, stop_expr) do { \
+#define IMPL1(mx, bx, vl_expr, stop_expr) do { \
 	vbool##bx##_t all = __riscv_vreinterpret_b##bx(v1); \
 	vuint64m1_t vlo = __riscv_vmv_v_x_u64m1(((((uint64_t)1 << (VL##mx-1)) - 1) << 1) + 1, VL1); \
 	vuint64m1_t vhi = __riscv_vnot(vlo, VL1); \
-	for (size_t vl; n > stop_expr; n -= vl, lhs += vl, rhs += vl, dst += vl) { \
+	for (size_t vl; stop_expr; n -= vl, lhs += vl, rhs += vl, dst += vl) { \
 		vl = vl_expr; \
 		vuint64m##mx##_t L = __riscv_vle64_v_u64m##mx(lhs, vl); \
 		vuint64m##mx##_t R = __riscv_vle64_v_u64m##mx(rhs, vl); \
@@ -129,13 +153,13 @@ add_rvv(uint64_t *restrict dst, uint64_t *restrict lhs, uint64_t *restrict rhs, 
 	} \
 } while (0)
 
-#define STEP2(mx, bx, vl_expr, stop_expr) do { \
+#define IMPL2(mx, bx, vl_expr, stop_expr) do { \
 	vbool##bx##_t all = __riscv_vreinterpret_b##bx(v1); \
 	vbool64_t all2 = __riscv_vreinterpret_b64(v1); \
 	size_t vl2 = VL##mx / 64;\
 	vuint64m1_t vlo = __riscv_vmv_v_x_u64m1(((((uint64_t)1 << (VL##mx/64-1)) - 1) << 1) + 1, VL1); \
 	vuint64m1_t vhi = __riscv_vnot(vlo, VL1); \
-	for (size_t vl; n > stop_expr; n -= vl, lhs += vl, rhs += vl, dst += vl) { \
+	for (size_t vl; stop_expr; n -= vl, lhs += vl, rhs += vl, dst += vl) { \
 		vl = vl_expr; \
 		vuint64m##mx##_t L = __riscv_vle64_v_u64m##mx(lhs, vl); \
 		vuint64m##mx##_t R = __riscv_vle64_v_u64m##mx(rhs, vl); \
@@ -159,16 +183,16 @@ add_rvv(uint64_t *restrict dst, uint64_t *restrict lhs, uint64_t *restrict rhs, 
 } while (0)
 
 
-	if (n <= 64) { STEP1(2, 32, __riscv_vsetvl_e64m2(n < VL2 ? n : VL2), 0); return; }
-	if (VL8 <= 64) STEP1(8, 8, VL8, VL8);
-	else           STEP2(8, 8, VL8, VL8);
-	if (VL4 <= 64) STEP1(4, 16, VL4, VL4);
-	else           STEP2(4, 16, VL4, VL4);
-	if (VL2 <= 64) STEP1(2, 32, __riscv_vsetvl_e64m2(n < VL2 ? n : VL2), 0);
-	else           STEP2(2, 32, __riscv_vsetvl_e64m2(n < VL2 ? n : VL2), 0);
+	if (n <= 64) { IMPL1(2, 32, __riscv_vsetvl_e64m2(n < VL2 ? n : VL2), n > 0); return; }
+	if (VL8 <= 64) IMPL1(8, 8, VL8, n >= VL8);
+	else           IMPL2(8, 8, VL8, n >= VL8);
+	if (VL4 <= 64) IMPL1(4, 16, VL4, n >= VL4);
+	else           IMPL2(4, 16, VL4, n >= VL4);
+	if (VL2 <= 64) IMPL1(2, 32, __riscv_vsetvl_e64m2(n < VL2 ? n : VL2), n > 0);
+	else           IMPL2(2, 32, __riscv_vsetvl_e64m2(n < VL2 ? n : VL2), n > 0);
 
-	#undef STEP1
-	#undef STEP2
+	#undef IMPL1
+	#undef IMPL2
 }
 #endif
 
@@ -233,7 +257,9 @@ LLVMFuzzerTestOneInput(const uint8_t *src, size_t size)
 		if (memcmp(ref, tst, n) != 0) { \
 			printf("ERROR: in " #name ", total=%zu\n", n); \
 			for (size_t i = 0; i < n; ++i) \
-				printf("%016zx + %016zx = %016zx, got %016zx %s\n", lhs[i], rhs[i], ref[i], tst[i], ref[i] != tst[i] ? "!!!" : ""); \
+				printf("%016zx + %016zx = %016zx, got %016zx %s\n", \
+					lhs[i], rhs[i], ref[i], tst[i], \
+					ref[i] != tst[i] ? "!!!" : ""); \
 			assert(0); \
 		} \
 
@@ -247,7 +273,7 @@ LLVMFuzzerTestOneInput(const uint8_t *src, size_t size)
 int
 main(void) /* for builds without libfuzzer */
 {
-	struct { uint8_t src[N*8*2]; size_t size; } arr[] = {
+	static const struct { uint8_t src[N*8*2]; size_t size; } arr[] = {
 	};
 	for (size_t i = 0; i < sizeof arr / sizeof *arr; ++i)
 		LLVMFuzzerTestOneInput(arr[i].src, arr[i].size);
@@ -300,7 +326,7 @@ bench(
 	uint64_t hash = 0;
 	for (size_t i = 0; i < n; ++i)
 		hash ^= hash64(dst[i]);
-	printf("%30s time: %f hash: %lx\n", name, (end-beg)*1.0/CLOCKS_PER_SEC, hash);
+	printf("%30s time: %f secs hash: %lx\n", name, (end-beg)*1.0/CLOCKS_PER_SEC, hash);
 }
 
 int
