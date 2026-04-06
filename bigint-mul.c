@@ -433,6 +433,9 @@ rbr_mul_56_rvv_carryi(
 		const uint64_t *restrict lhs56, size_t nl56,
 		const uint64_t *restrict rhs56, size_t lr56);
 
+#include <gmp.h>
+void mul_gmp(ARGS) { mpn_mul(dst, lhs, nl, rhs, nr); }
+
 int
 main(void)
 {
@@ -442,6 +445,7 @@ main(void)
 		printf("n=%zu:\n", n);
 		#define XBENCH(name) bench(#name, &name, n);
 		XMACRO(XBENCH)
+		bench("gmp", mul_gmp, n);
 #if __riscv_vector
 		bench("rbr", rbr_mul_56_rvv_carryi, (n*64+55)/56);
 		bench("vmacc52", mul_vmaccN, (n*64+63)/52);
